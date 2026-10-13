@@ -1,9 +1,13 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin</title><link rel="stylesheet" href="style.css"></head><body><div class="wrap"><div id="root"></div></div>
+<title>Admin</title><link rel="stylesheet" href="style.css">
+<style>.acts{display:flex;gap:6px;justify-content:flex-end;align-items:center}.acts button{width:auto}
+button.lnk{background:none;color:var(--acc);width:auto;padding:2px 6px}
+button.cancel{background:none;color:var(--mute);border:1px solid var(--line)}
+.ghead-btns{margin-top:6px}</style></head><body><div class="wrap"><div id="root"></div></div>
 <script type="module">
 import { api, esc, money, sum } from "./app.js";
 const root = document.getElementById("root");
-let pw = sessionStorage.getItem("pw") || "", data = null, msg = "", isErr = false;
+let pw = sessionStorage.getItem("pw") || "", data = null, msg = "", isErr = false, editing = null;
 const note = () => msg ? `<p class="msg ${isErr ? "err" : ""}">${esc(msg)}</p>` : "";
 function login() {
   root.innerHTML = `<h1>Admin login</h1>${note()}<form class="row" id="lf"><input type="password" id="p" placeholder="Password" required autofocus><button>Log in</button></form>`;
@@ -15,21 +19,31 @@ function login() {
 }
 async function load() { data = await api("data"); view(); }
 async function act(path, method, body, ok) {
-  try { data = await api(path, method, body, pw); msg = ok; isErr = false; }
+  try { data = await api(path, method, body, pw); msg = ok; isErr = false; editing = null; }
   catch (e) { msg = e.message; isErr = true; if (/password/i.test(e.message)) { sessionStorage.removeItem("pw"); return login(); } }
   view();
 }
+const donRow = (c, d) => editing === d.id
+  ? `<tr><td colspan="3"><form class="row three" data-ef="${c.id}/${d.id}"><input name="donor" value="${esc(d.donor)}" required><input name="amount" type="number" step="0.01" min="0.01" value="${d.amount}" required><div class="acts"><button>Save</button><button type="button" class="cancel">Cancel</button></div></form></td></tr>`
+  : `<tr><td>${esc(d.donor)}</td><td class="n">${money(d.amount)}</td><td class="n"><div class="acts"><button class="lnk" data-edit="${d.id}">Edit</button><button class="del" data-rd="${c.id}/${d.id}">Remove</button></div></td></tr>`;
+const head = (c) => editing === c.id
+  ? `<form class="row" data-cf="${c.id}"><input name="title" value="${esc(c.title)}" required><input name="group" value="${esc(c.group || "")}" placeholder="Group name (optional)"><div class="acts"><button>Save</button><button type="button" class="cancel">Cancel</button></div></form>`
+  : `<div class="gtitle"><h2>${esc(c.title)}${c.group ? ` <span class="muted">(group: ${esc(c.group)})</span>` : ""}</h2><div class="big">${money(sum(c))}</div></div>`;
 function view() {
   root.innerHTML = `<h1>Admin</h1><p class="sub"><a href="/">View public page</a> · <a href="#" id="lo">Log out</a></p>${note()}
   <section class="group"><h2>New contribution</h2><form class="row" id="nc"><input name="title" placeholder="Title, e.g. Funeral support" required>
   <input name="group" placeholder="Group name (optional): use the same name to combine contributions"><button>Create contribution</button></form></section>
-  ${data.contributions.map((c) => `<section class="group"><div class="gtitle"><h2>${esc(c.title)}${c.group ? ` <span class="muted">(group: ${esc(c.group)})</span>` : ""}</h2><div class="big">${money(sum(c))}</div></div>
+  ${data.contributions.map((c) => `<section class="group">${head(c)}
   <form class="row three nd" data-id="${c.id}"><input name="donor" placeholder="Donor name" required><input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount" required><button>Add</button></form>
-  ${c.donations.length ? `<table>${c.donations.map((d) => `<tr><td>${esc(d.donor)}</td><td class="n">${money(d.amount)}</td><td class="n"><button class="del" data-rd="${c.id}/${d.id}">Remove</button></td></tr>`).join("")}</table>` : ""}
-  <p><button class="del" data-dc="${c.id}">Delete contribution</button></p></section>`).join("")}`;
+  ${c.donations.length ? `<table>${c.donations.map((d) => donRow(c, d)).join("")}</table>` : ""}
+  <div class="acts ghead-btns" style="justify-content:flex-start"><button class="lnk" data-edit="${c.id}">Edit title or group</button><button class="del" data-dc="${c.id}">Delete contribution</button></div></section>`).join("")}`;
   document.getElementById("lo").onclick = (e) => { e.preventDefault(); sessionStorage.removeItem("pw"); pw = ""; msg = ""; login(); };
   document.getElementById("nc").onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); act("contributions", "POST", { title: f.get("title"), group: f.get("group") }, "Contribution created."); };
   document.querySelectorAll(".nd").forEach((fm) => fm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(fm); act("donations", "POST", { cid: fm.dataset.id, donor: f.get("donor"), amount: f.get("amount") }, "Added " + f.get("donor") + "."); });
+  document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { editing = b.dataset.edit; view(); });
+  document.querySelectorAll(".cancel").forEach((b) => b.onclick = () => { editing = null; view(); });
+  document.querySelectorAll("[data-ef]").forEach((fm) => fm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(fm); act("donations/" + fm.dataset.ef, "PUT", { donor: f.get("donor"), amount: f.get("amount") }, "Entry updated."); });
+  document.querySelectorAll("[data-cf]").forEach((fm) => fm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(fm); act("contributions/" + fm.dataset.cf, "PUT", { title: f.get("title"), group: f.get("group") }, "Contribution updated."); });
   document.querySelectorAll("[data-rd]").forEach((b) => b.onclick = () => confirm("Remove this entry?") && act("donations/" + b.dataset.rd, "DELETE", null, "Entry removed."));
   document.querySelectorAll("[data-dc]").forEach((b) => b.onclick = () => confirm("Delete this whole contribution and its entries?") && act("contributions/" + b.dataset.dc, "DELETE", null, "Contribution deleted."));
 }
